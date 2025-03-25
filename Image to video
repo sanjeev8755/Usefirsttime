@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image to HD Video Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        #upload-container {
+            border: 2px dashed #ccc;
+            padding: 30px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        #preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        #preview img {
+            max-height: 100px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+        }
+        #progress {
+            margin: 20px 0;
+            display: none;
+        }
+        progress {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>Image to HD Video Converter</h1>
+    <div id="upload-container">
+        <p>अपनी इमेजेस यहां अपलोड करें (JPEG/PNG)</p>
+        <input type="file" id="image-input" multiple accept="image/jpeg,image/png">
+    </div>
+    
+    <div id="preview"></div>
+    
+    <button id="convert-btn" disabled>वीडियो बनाएं (HD)</button>
+    
+    <div id="progress" style="display: none;">
+        <p>वीडियो बनाया जा रहा है...</p>
+        <progress id="progress-bar" value="0" max="100"></progress>
+        <p id="status"></p>
+    </div>
+    
+    <div id="result" style="margin-top: 20px;"></div>
+
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <script>
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        const ffmpeg = createFFmpeg({ 
+            log: true,
+            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+        });
+        
+        const imageInput = document.getElementById('image-input');
+        const convertBtn = document.getElementById('convert-btn');
+        const previewDiv = document.getElementById('preview');
+        const progressDiv = document.getElementById('progress');
+        const progressBar = document.getElementById('progress-bar');
+        const statusText = document.getElementById('status');
+        const resultDiv = document.getElementById('result');
+        
+        let selectedImages = [];
+        
+        // इमेज प्रिव्यू दिखाने के लिए
+        imageInput.addEventListener('change', async (e) => {
+            previewDiv.innerHTML = '';
+            selectedImages = Array.from(e.target.files);
+            
+            if (selectedImages.length === 0) {
+                convertBtn.disabled = true;
+                return;
+            }
+            
+            convertBtn.disabled = false;
+            
+            for (const file of selectedImages) {
+                const img = document.createElement('img');
+                img.src = URL.createObjectURL(file);
+                previewDiv.appendChild(img);
+            }
+        });
+        
+        // वीडियो कन्वर्ट करने के लिए
+        convertBtn.addEventListener('click', async () => {
+            if (selectedImages.length === 0) return;
+            
+            convertBtn.disabled = true;
+            progressDiv.style.display = 'block';
+            resultDiv.innerHTML = '';
+            
+            try {
+                statusText.textContent = 'FFmpeg लोड हो रहा है...';
+                await ffmpeg.load();
+                
+                // इमेजेस को FFmpeg में लोड करें
+                statusText.textContent = 'इमेजेस प्रोसेस की जा रही हैं...';
+                for (let i = 0; i < selectedImages.length; i++) {
+                    const file = selectedImages[i];
+                    const fileName = `image${i}.${file.name.split('.').pop()}`;
+                    ffmpeg.FS('writeFile', fileName, await fetchFile(file));
+                    
+                    // प्रोग्रेस अपडेट करें
+                    progressBar.value = (i / selectedImages.length) * 50;
+                }
+                
+                // FFmpeg कमांड रन करें (HD 1080p वीडियो के लिए)
+                statusText.textContent = 'वीडियो बनाया जा रहा है...';
+                await ffmpeg.run(
+                    '-framerate', '1/2',                 // 2 सेकंड प्रति इमेज
+                    '-pattern_type', 'glob',            // फाइल पैटर्न
+                    '-i', 'image*.jpg',                 // इनपुट फाइल्स
+                    '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1', // 1080p HD
+                    '-c:v', 'libx264',                  // H.264 एनकोडिंग
+                    '-preset', 'slow',                  // बेहतर क्वालिटी
+                    '-crf', '18',                      // हाई क्वालिटी (0-51, जितना कम उतना बेहतर)
+                    '-pix_fmt', 'yuv420p',             
+                    '-r', '30',                         // 30 FPS
+                    'output.mp4'                        // आउटपुट फाइल
+                );
+                
+                progressBar.value = 100;
+                statusText.textContent = 'वीडियो तैयार है!';
+                
+                // रिजल्ट दिखाएं
+                const data = ffmpeg.FS('readFile', 'output.mp4');
+                const videoUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+                
+                resultDiv.innerHTML = `
+                    <h3>आपका वीडियो तैयार है:</h3>
+                    <video controls autoplay style="max-width: 100%;">
+                        <source src="${videoUrl}" type="video/mp4">
+                    </video>
+                    <p>
+                        <a href="${videoUrl}" download="video.mp4">वीडियो डाउनलोड करें</a>
+                    </p>
+                `;
+                
+            } catch (error) {
+                console.error(error);
+                resultDiv.innerHTML = `<p style="color: red;">त्रुटि: ${error.message}</p>`;
+            } finally {
+                convertBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
